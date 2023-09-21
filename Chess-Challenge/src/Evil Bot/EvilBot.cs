@@ -1,54 +1,99 @@
-﻿using ChessChallenge.API;
-using System;
+﻿/*
+ * Stockfish UCI implementation
+ * for evaluating changes to MyBot.
+ */
 
 namespace ChessChallenge.Example
 {
-    // A simple bot that can spot mate in one, and always captures the most valuable piece it can.
-    // Plays randomly otherwise.
+    using System;
+    using System.Diagnostics;
+    using ChessChallenge.API;
+
     public class EvilBot : IChessBot
     {
-        // Piece values: null, pawn, knight, bishop, rook, queen, king
-        int[] pieceValues = { 0, 100, 300, 300, 500, 900, 10000 };
+        Process stockfish;
+
+        public EvilBot()
+        {
+            stockfish = new();
+            stockfish.StartInfo.RedirectStandardInput = true;
+            stockfish.StartInfo.RedirectStandardOutput = true;
+            stockfish.StartInfo.FileName = "/bin/stockfish";
+            stockfish.Start();
+
+            WriteLine("uci");
+            if (!IsOk())
+            {
+                throw new Exception("Stockfish is not ok");
+            }
+
+            // WriteLine($"setoption name Skill Level value {3}");
+            WriteLine("setoption name UCI_LimitStrength value true");
+            WriteLine("setoption name UCI_ELO value 1650"); // min 1320 max 3190
+            WriteLine("setoption name Threads value 16");
+            WriteLine("setoption name Ponder value false");
+            WriteLine("ucinewgame");
+        }
 
         public Move Think(Board board, Timer timer)
         {
-            Move[] allMoves = board.GetLegalMoves();
+            WriteLine($"position fen {board.GetFenString()}");
 
-            // Pick a random move to play if nothing better is found
-            Random rng = new();
-            Move moveToPlay = allMoves[rng.Next(allMoves.Length)];
-            int highestValueCapture = 0;
+            var ourTeam = board.IsWhiteToMove ? "w" : "b";
+            var enemyTeam = board.IsWhiteToMove ? "b" : "w";
+            WriteLine($"go {ourTeam}time {timer.MillisecondsRemaining} {enemyTeam}time {timer.OpponentMillisecondsRemaining}");
 
-            foreach (Move move in allMoves)
+            Move? move = GetBestMove(board);
+            if (move == null)
             {
-                // Always play checkmate in one
-                if (MoveIsCheckmate(board, move))
-                {
-                    moveToPlay = move;
-                    break;
-                }
-
-                // Find highest value capture
-                Piece capturedPiece = board.GetPiece(move.TargetSquare);
-                int capturedPieceValue = pieceValues[(int)capturedPiece.PieceType];
-
-                if (capturedPieceValue > highestValueCapture)
-                {
-                    moveToPlay = move;
-                    highestValueCapture = capturedPieceValue;
-                }
+                throw new Exception("Stockfish returned no move");
             }
-
-            return moveToPlay;
+            return (Move)move;
         }
 
-        // Test if this move gives checkmate
-        bool MoveIsCheckmate(Board board, Move move)
+        string? ReadLine()
         {
-            board.MakeMove(move);
-            bool isMate = board.IsInCheckmate();
-            board.UndoMove(move);
-            return isMate;
+            var line = stockfish.StandardOutput.ReadLine();
+            // if (line != null)
+            // {
+            //     Console.WriteLine($"stockfish: {line}");
+            // }
+            return line;
+        }
+
+        void WriteLine(string line)
+        {
+            stockfish.StandardInput.WriteLine(line);
+        }
+
+        private bool IsOk()
+        {
+            string? line;
+            var ok = false;
+            while ((line = ReadLine()) != null)
+            {
+                if (line == "uciok")
+                {
+                    ok = true;
+                    break;
+                }
+            }
+            return ok;
+        }
+
+        private Move? GetBestMove(Board board)
+        {
+            string? line;
+            Move? move = null;
+            while ((line = ReadLine()) != null)
+            {
+                if (line.StartsWith("bestmove"))
+                {
+                    move = new Move(line.Split()[1], board);
+                    break;
+                }
+            }
+            return move;
         }
     }
 }
